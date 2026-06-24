@@ -1,0 +1,22 @@
+{
+  "global": {
+    "threads": 1,
+    "timeout": 15,
+    "custom_header": "X-BugBounty: pablo_bernal",
+    "user_agent": "GhostBear-Hunter/2.0"
+  },
+  "httpx": {
+    "status_codes": "200,301,302,403",
+    "rate_limit": 1,
+    "delay": "0s"
+  },
+  "katana": {
+    "depth": 2,
+    "rate_limit": 1,
+    "delay": "0s"
+  },
+  "subfinder": {
+    "rate_limit": 15,
+    "delay": "0s"
+  }
+}
