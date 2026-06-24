@@ -1,0 +1,3 @@
+# Lista de dominios autorizados (uno por línea)
+ejemplo.com
+*.ejemplo.com
