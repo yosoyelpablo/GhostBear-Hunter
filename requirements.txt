@@ -1,6 +1,7 @@
 # IA y Core
 google-genai>=0.1.0
 pydantic>=2.7.0
+google-generativeai==0.8.4
 
 # Gestión de entorno
 python-dotenv>=1.0.0
