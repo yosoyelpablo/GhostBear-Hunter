@@ -26,13 +26,13 @@ logger = logging.getLogger("GhostBear-Hunter")
 BANNER = """
 ====================================================================
   ____ _                 _   ____                  _   _             _             
- / ___| |__   ___  ___| |_| __ )  ___  __ _ _ __| | | |_   _ _ __ | |_ ___ _ __  
-| |   | '_ \ / _ \/ __| __|  _ \ / _ \/ _` | '__| |_| | | | | '_ \| __/ _ \ '__| 
-| |___| | | | (_) \__ \ |_| |_) |  __/ (_| | |  |  _  | |_| | | | | ||  __/ |    
- \____|_| |_|\___/|___/\__|____/ \___|\__,_|_|  |_| |_|\__,_|_| |_|\__\___|_|    
-                                                                                 
+ / ___| |__   ___  ___| |_|  _ \  ___  __ _ _ __| | | |_   _ _ __ | |_ ___ _ __  
+| |   | '_ \ / _ \/ __| __| |_) / _ \/ _` | '__| |_| | | | | '_ \| __/ _ \ '__| 
+| |___| | | | (_) \__ \ |_|  _ <  __/ (_| | |  |  _  | |_| | | | | ||  __/ |    
+ \____|_| |_|\___/|___/\__|_| \_\___|\__,_|_|  |_| |_|\__,_|_| |_|\__\___|_|    
+                                                                                
     [+] Framework de Automatización y Orquestación de Reconocimiento
-    [+] Estado: Desarrollo - Pipeline Core 100% Optimizado (Streaming)
+    [+] Estado: Desarrollo - Pipeline Core 100% Sincronizado (Fix)
 ====================================================================
 """
 
@@ -47,14 +47,16 @@ def parse_arguments():
     target_group.add_argument("-d", "--domain", help="Dominio objetivo individual para iniciar el escaneo (ej: target.com).")
     target_group.add_argument("--all-scope", action="store_true", help="Procesar todos los dominios base listados en config/scope.txt.")
 
-    # Parámetros HTTPX (Live Checker)
-    httpx_group = parser.add_argument_group("Configuración de HTTPX (Live Checker)")
-    httpx_group.add_argument("-t", "--threads", type=int, default=50, help="Número de hilos concurrentes para httpx (Defecto: 50).")
-    httpx_group.add_argument("--timeout", type=int, default=10, help="Timeout en segundos para las peticiones HTTP (Defecto: 10).")
-    httpx_group.add_argument("--status-codes", type=str, default="200,301,302,403", help="Códigos de estado HTTP permitidos separados por comas (Defecto: 200,301,302,403).")
+    # Parámetros Operativos Globales (Evasión y Rendimiento)
+    op_group = parser.add_argument_group("Configuración de Rendimiento y Políticas de Red")
+    op_group.add_argument("-t", "--threads", type=int, default=40, help="Número de hilos concurrentes para los subprocesos (Defecto: 40).")
+    op_group.add_argument("-rl", "--rate-limit", type=int, default=15, help="Límite estricto de peticiones por segundo (RPS) por herramienta (Defecto: 15).")
+    op_group.add_argument("--timeout", type=int, default=10, help="Timeout en segundos para las peticiones HTTP (Defecto: 10).")
+    op_group.add_argument("--status-codes", type=str, default="200,301,302,403", help="Códigos de estado HTTP permitidos (Defecto: 200,301,302,403).")
+    op_group.add_argument("--user-agent", type=str, default="GhostBear-Hunter-Scanner/1.0", help="User-Agent personalizado para las cabeceras HTTP.")
+    op_group.add_argument("--header", type=str, default="", help="Cabecera custom opcional en formato 'Nombre: Valor' (ej: 'X-BugBounty: pablo').")
 
-    # Modos de ejecución
-    parser.add_argument("--silent", action="store_true", help="Modo silencioso: reduce el output visual de las herramientas subyacentes.")
+    parser.add_argument("--silent", action="store_true", help="Modo silencioso.")
     
     return parser.parse_args()
 
@@ -74,7 +76,7 @@ def save_report(target: str, content: str) -> str:
 
 def main():
     print(BANNER)
-    load_dotenv()  # Carga variables desde el archivo .env central
+    load_dotenv()  
     args = parse_arguments()
 
     try:
@@ -82,7 +84,7 @@ def main():
         logger.info("Inicializando el motor de validación de Scope...")
         validator = ScopeValidator()
 
-        # 2. Inicializar Wrappers del Pipeline (Inyección de dependencias jerárquica)
+        # 2. Inicializar Módulos del Pipeline
         sub_recon = SubRecon(validator)
         archive_crawler = ArchiveCrawler(validator)
         spider_crawler = SpiderCrawler(validator)
@@ -97,11 +99,10 @@ def main():
                 targets_to_process.append(args.domain)
                 logger.info(f"Objetivo directo validado exitosamente: {args.domain}")
             else:
-                logger.error(f"El objetivo proporcionado '{args.domain}' está FUERA de alcance según las reglas de scope.txt.")
+                logger.error(f"El objetivo proporcionado '{args.domain}' está FUERA de alcance según las reglas.")
                 sys.exit(1)
         elif args.all_scope:
-            # Extraer los dominios raíz limpios presentes en el archivo de alcance
-            with open(validator.scope_path, "r") as f:
+            with open(validator.scope_path, "r", encoding="utf-8") as f:
                 for line in f:
                     line = line.strip()
                     if line and not line.startswith("#") and not line.startswith("*."):
@@ -112,38 +113,68 @@ def main():
             logger.error("No se encontraron objetivos válidos para procesar. Abortando.")
             sys.exit(1)
 
-        # 4. Pipeline de Orquestación Secuencial de Alto Rendimiento
+        # 4. Pipeline de Orquestación Secuencial Sincronizado
         for target in targets_to_process:
             logger.info(f"================================================================")
             logger.info(f"INICIANDO PIPELINE OPERATIVO PARA: {target}")
             logger.info(f"================================================================")
             
-            # --- FASE 1: Enumeración de Subdominios (Activa) ---
-            discovered_subs = sub_recon.run(target)
+            # --- FASE 1: Enumeración de Subdominios (Pasiva) ---
+            discovered_subs = sub_recon.run(target, rate_limit=args.rate_limit, threads=args.threads)
             clean_subs = list(discovered_subs) if discovered_subs else []
             
             if not clean_subs:
-                logger.warning(f"No se detectaron subdominios permitidos para {target}. Saltando a la siguiente semilla.")
+                logger.warning(f"No se detectaron subdominios permitidos para {target}. Saltando semilla.")
                 continue
 
-            # --- FASE 2: Extracción de URLs Paralela y Concurrente ---
-            # Aprovechamos el refactor por stdin mandándole la lista completa de subdominios de un viaje
+            # --- FASE 2: Extracción de URLs Históricas y Activas ---
             gau_urls = archive_crawler.run(clean_subs)
-            katana_urls = spider_crawler.run(clean_subs, depth=2)
+            katana_urls = spider_crawler.run(
+                subdomains=clean_subs, 
+                depth=2, 
+                rate_limit=args.rate_limit, 
+                custom_header=args.header, 
+                user_agent=args.user_agent
+            )
             
             all_discovered_urls = gau_urls.union(katana_urls)
             logger.info(f"Consolidado total de URLs In-Scope para {target}: {len(all_discovered_urls)} objetivos únicos.")
 
-            # --- FASE 3: Validación de Hosts Vivos (Streaming Activo) ---
+            # --- FASE 3: Validación de Hosts Vivos (HTTPX) ---
             live_urls = live_checker.run(
                 urls=all_discovered_urls,
                 threads=args.threads,
                 timeout=args.timeout,
-                status_codes=args.status_codes
+                status_codes=args.status_codes,
+                rate_limit=args.rate_limit,
+                custom_header=args.header,
+                user_agent=args.user_agent
             )
 
-            # --- FASE 4: Análisis Estático de Patrones Sensibles y Parámetros Hot ---
+            if not live_urls:
+                logger.warning(f"No se detectaron endpoints vivos respondiendo para {target}.")
+                continue
+
+            # --- FASE 4: Análisis Estático de Patrones y Parámetros Hot ---
             analysis_results = pattern_analyzer.run(live_urls)
 
-            # --- FASE 5: Triaje Cognitivo con IA (Generación de Inteligencia) ---
-            blueprint = ai_mentor.generate
+            # --- FASE 5: Triaje Cognitivo con IA y Reporte ---
+            logger.info("Enviando resultados consolidados al motor de IA (Gemini)...")
+            blueprint = ai_mentor.generate_blueprint(target, analysis_results)
+            
+            if blueprint:
+                report_path = save_report(target, blueprint)
+                if report_path:
+                    logger.info(f"[+] ¡Operación Exitosa! Blueprint estratégico consolidado en: {report_path}")
+            else:
+                logger.error("El motor de IA no pudo estructurar la hipótesis de ataque.")
+
+    except KeyboardInterrupt:
+        logger.warning("\n[!] Operación global abortada por el usuario via KeyboardInterrupt. Saliendo de forma segura...")
+        sys.exit(0)
+    except Exception as e:
+        logger.critical(f"Falla crítica catastrófica en el bucle principal: {e}", exc_info=True)
+        sys.exit(1)
+
+if __name__ == "__main__":
+    main()
