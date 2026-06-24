@@ -1,80 +1,89 @@
-import shutil
 import subprocess
+import shutil
 import logging
-from typing import Set, List
+from typing import Set
 from src.core.scope_validator import ScopeValidator
 
 logger = logging.getLogger("GhostBear-Hunter.SubRecon")
 
 class SubRecon:
-    """Wrapper de alto rendimiento para Subfinder, encargado de la enumeración pasiva de subdominios."""
-
     def __init__(self, validator: ScopeValidator):
+        """Inicializa el módulo de enumeración pasiva verificando el entorno."""
         self.validator = validator
         self.binary_name = "subfinder"
-        self._check_dependency()
+        self.available = shutil.which(self.binary_name) is not None
+        
+        if not self.available:
+            logger.error(f"Falta una dependencia crítica: '{self.binary_name}' no está en el PATH.")
 
-    def _check_dependency(self) -> None:
-        """Verifica si el binario de subfinder está instalado en el PATH del sistema."""
-        if not shutil.which(self.binary_name):
-            logger.error(f"El binario '{self.binary_name}' no se encuentra en el PATH. "
-                         "Instalalo usando: go install -v github.com/projectdiscovery/subfinder/v2/cmd/subfinder@latest")
-            self.available = False
-        else:
-            self.available = True
-
-    def run(self, domain: str) -> Set[str]:
+    def run(self, target: str, rate_limit: int, threads: int) -> Set[str]:
         """
-        Ejecuta subfinder para un dominio objetivo y filtra los subdominios
-        descubiertos en tiempo real aplicando control de Scope estricto.
+        Ejecuta subfinder en modo streaming, validando el alcance en tiempo real
+        y controlando de forma segura los recursos del sistema.
         """
         if not self.available:
-            logger.warning(f"Saltando Fase 1 para {domain} debido a la falta del binario 'subfinder'.")
-            return {domain}
+            logger.warning("SubRecon omitido: binario subfinder no disponible.")
+            return set()
 
-        discovered_subs: Set[str] = set()
-        logger.info(f"Iniciando enumeración pasiva de subdominios para: {domain}")
+        if not target:
+            logger.error("SubRecon recibió un target vacío. Abortando fase.")
+            return set()
 
-        # Configuración optimizada de Subfinder para automatización
+        logger.info(f"Iniciando enumeración pasiva con Subfinder para: {target}")
+        subdomains: Set[str] = set()
+
+        # Construcción dinámica del comando basado en el settings.json
         cmd = [
             self.binary_name,
-            "-d", domain,
-            "-silent",          # Elimina banners de texto decorativos
-            "-no-color"         # Salida limpia en texto plano
+            "-d", target,
+            "-t", str(threads),
+            "-rl", str(rate_limit),
+            "-silent",
+            "-no-color"
         ]
 
+        process = None
         try:
-            logger.debug(f"Lanzando proceso: {' '.join(cmd)}")
+            # Redirigimos stderr a DEVNULL o STDOUT para evitar que el buffer se llene y congele el script
             process = subprocess.Popen(
-                cmd,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
-                text=True,
-                bufsize=1
+                cmd, 
+                stdout=subprocess.PIPE, 
+                stderr=subprocess.DEVNULL, 
+                text=True
             )
-
-            # Procesamiento iterativo en tiempo real por cada línea del stdout
-            if process.stdout:
-                for line in process.stdout:
-                    subdomain = line.strip()
-                    if subdomain:
-                        # Validación inmediata de alcance
-                        if self.validator.is_allowed(subdomain):
-                            discovered_subs.add(subdomain)
-                        else:
-                            logger.debug(f"Subdominio descartado por reglas de Scope (Out-of-Scope): {subdomain}")
-
-            _, stderr_output = process.communicate()
-            if process.returncode != 0 and stderr_output:
-                if "error" in stderr_output.lower():
-                    logger.warning(f"Subfinder reportó un problema para {domain}: {stderr_output.strip()}")
-
+            
+            # Streaming en tiempo real del output de subfinder
+            for line in process.stdout:
+                sub = line.strip()
+                if not sub:
+                    continue
+                    
+                # Filtro estricto usando el Guardián Legal (ScopeValidator)
+                if self.validator.is_allowed(sub):
+                    subdomains.add(sub)
+                    logger.debug(f"[In-Scope] Subdominio detectado: {sub}")
+                else:
+                    logger.debug(f"[Out-of-Scope] Subdominio ignorado: {sub}")
+            
+            # Esperamos que el proceso termine y capturamos el código de estado
+            return_code = process.wait()
+            
+            if return_code == 0:
+                logger.info(f"Subfinder finalizó exitosamente. {len(subdomains)} subdominios consolidados In-Scope.")
+            else:
+                logger.error(f"Subfinder terminó con un código de error no esperado: {return_code}")
+            
+        except KeyboardInterrupt:
+            logger.warning("\n[!] Interrupción detectada en SubRecon. Terminando subprocesos de Go...")
+            if process:
+                process.kill()  # Matamos el binario para no dejar zombies
+                process.wait()
+            raise  # Propagamos la interrupción al main.py para una salida limpia global
+            
         except Exception as e:
-            logger.error(f"Error crítico ejecutando Subfinder en el objetivo {domain}: {e}")
+            logger.error(f"Error crítico inesperado en el wrapper de Subfinder: {e}", exc_info=True)
+            if process:
+                process.kill()
+                process.wait()
 
-        # Aseguramos que al menos el dominio base esté presente si pasó el filtro
-        if self.validator.is_allowed(domain):
-            discovered_subs.add(domain)
-
-        logger.info(f"Fase 1 completada para {domain}. Subdominios válidos e In-Scope hallados: {len(discovered_subs)}")
-        return discovered_subs
+        return subdomains
