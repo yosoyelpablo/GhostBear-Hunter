@@ -27,31 +27,31 @@ class LiveChecker:
         y responden bajo los criterios de filtrado seleccionados.
         """
         if not self.available:
-            logger.warning("Saltando validación de hosts vivos debido a la falta de 'httpx'.")
-            return list(urls) # Devolvemos el input original para no romper el pipeline, aunque sin filtrar
+            logger.warning("Saltando validación de hosts vivos debido a la falta de 'httpx'. Devolviendo pool sin filtrar.")
+            return list(urls)
 
         if not urls:
             logger.info("No hay URLs cargadas en el pool para verificar con HTTPX.")
             return []
 
         live_endpoints: List[str] = []
-        logger.info(f"Filtrando {len(urls)} URLs con HTTPX [Hilos: {threads} | Timeout: {args_timeout := timeout}s | Códigos: {status_codes}]...")
+        logger.info(f"Filtrando {len(urls)} URLs con HTTPX [Hilos: {threads} | Timeout: {timeout}s | Códigos: {status_codes}]...")
 
-        # Construcción dinámica de flags de HTTPX
+        # Configuración dinámica del binario sin interactuar con la Shell
         cmd = [
             self.binary_name,
-            "-t", str(threads),          # Hilos concurrentes
-            "-timeout", str(timeout),    # Timeout de la petición
-            "-mc", status_codes,         # Match Codes (ej: 200,301,302,403)
-            "-silent",                   # Desactiva la barra de progreso y banners
-            "-no-color"                  # Output crudo sin decoradores ANSI
+            "-t", str(threads),
+            "-timeout", str(timeout),
+            "-mc", status_codes,
+            "-silent",
+            "-no-color"
         ]
 
         try:
-            # Unimos las URLs con saltos de línea para inyectarlas por stdin
+            # Unimos el set de URLs por saltos de línea para pasarlas limpias al buffer stdin
             stdin_data = "\n".join(urls)
-
             logger.debug(f"Lanzando proceso: {' '.join(cmd)}")
+            
             process = subprocess.Popen(
                 cmd,
                 stdin=subprocess.PIPE,
@@ -61,14 +61,14 @@ class LiveChecker:
                 bufsize=1
             )
 
-            # Comunicar envía los datos al stdin y cierra el stream, capturando la salida
+            # Inyección directa por pipeline de memoria y recolección de respuestas masivas
             stdout_output, stderr_output = process.communicate(input=stdin_data)
 
             if process.returncode != 0 and stderr_output:
                 if "error" in stderr_output.lower():
                     logger.warning(f"HTTPX emitió una alerta durante el escaneo: {stderr_output.strip()}")
 
-            # Procesar la salida limpia (cada línea devuelta por HTTPX es una URL viva que macheó los códigos)
+            # Parseo inmediato línea por línea de los objetivos vivos devueltos
             for line in stdout_output.splitlines():
                 endpoint = line.strip()
                 if endpoint:
