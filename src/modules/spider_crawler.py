@@ -1,5 +1,5 @@
-import shutil
 import subprocess
+import shutil
 import logging
 from typing import List, Set
 from src.core.scope_validator import ScopeValidator
@@ -7,86 +7,93 @@ from src.core.scope_validator import ScopeValidator
 logger = logging.getLogger("GhostBear-Hunter.SpiderCrawler")
 
 class SpiderCrawler:
-    """Wrapper optimizado de alto rendimiento para el crawler web dinámico Katana."""
-
     def __init__(self, validator: ScopeValidator):
+        """Inicializa el crawler activo verificando que Katana esté disponible."""
         self.validator = validator
         self.binary_name = "katana"
-        self._check_dependency()
+        self.available = shutil.which(self.binary_name) is not None
 
-    def _check_dependency(self) -> None:
-        """Verifica si el binario de Katana está instalado en el PATH del sistema."""
-        if not shutil.which(self.binary_name):
-            logger.error(f"El binario '{self.binary_name}' no se encuentra en el PATH. "
-                         "Instalalo con: go install github.com/projectdiscovery/katana/cmd/katana@latest")
-            self.available = False
-        else:
-            self.available = True
+        if not self.available:
+            logger.error(f"Falta una dependencia crítica: '{self.binary_name}' no está en el PATH.")
 
-    def run(self, targets: List[str], depth: int = 3) -> Set[str]:
+    def run(self, subdomains: List[str], depth: int, rate_limit: int, custom_header: str, user_agent: str) -> Set[str]:
         """
-        Lanza Katana de forma masiva usando stdin para procesar múltiples objetivos en paralelo,
-        parseando endpoints y aplicando validación estricta de alcance en tiempo real.
+        Ejecuta Katana a través de inyección por stdin en modo streaming.
+        Soporta cancelación limpia y previene bloqueos de buffer.
         """
         if not self.available:
-            logger.warning("Saltando Spider Crawler debido a la falta del binario 'katana'.")
+            logger.warning("SpiderCrawler omitido: binario katana no disponible.")
             return set()
 
-        if not targets:
-            logger.warning("No se proporcionaron objetivos para procesar en Spider Crawler.")
+        if not subdomains:
+            logger.warning("SpiderCrawler no recibió subdominios para rastrear.")
             return set()
 
+        logger.info(f"Iniciando Spidering activo con Katana (Profundidad: {depth} | Rate Limit: {rate_limit} RPS)...")
         discovered_urls: Set[str] = set()
-        logger.info(f"Iniciando crawling activo paralelo con Katana para {len(targets)} hosts (Profundidad: {depth})...")
 
-        # Configuración de optimización masiva para automatización.
-        # Al no declarar el flag '-u', Katana entiende de forma nativa que debe leer del stdin.
+        # Construcción exacta del comando según la política del JSON
         cmd = [
             self.binary_name,
             "-d", str(depth),
-            "-jc",              # Parsea archivos JavaScript y busca endpoints ocultos
-            "-silent",          # Evita banners e información innecesaria en stdout
-            "-no-color"         # Salida limpia para procesar strings sin caracteres ANSI
+            "-rl", str(rate_limit),
+            "-silent",
+            "-no-color"
         ]
 
-        try:
-            logger.debug(f"Lanzando proceso unificado de Katana: {' '.join(cmd)}")
-            process = subprocess.Popen(
-                cmd,
-                stdin=subprocess.PIPE,   # Habilitamos la entrada para inyectar los objetivos
-                stdout=subprocess.PIPE,  # Capturamos el streaming de URLs descubiertas
-                stderr=subprocess.PIPE,
-                text=True,
-                bufsize=1                # Modo streaming línea por línea
-            )
+        # Inyección de cabeceras de identidad exigidas por las plataformas
+        if user_agent:
+            cmd.extend(["-H", f"User-Agent: {user_agent}"])
+        if custom_header and ":" in custom_header:
+            cmd.extend(["-H", custom_header])
 
-            # Normalizamos y unificamos la lista de objetivos agregando el esquema si falta
-            input_data = "\n".join(t if "://" in t else f"http://{t}" for t in targets) + "\n"
+        process = None
+        try:
+            # Enviamos stderr a DEVNULL para evitar colgar el buffer de salida de errores
+            process = subprocess.Popen(
+                cmd, 
+                stdin=subprocess.PIPE, 
+                stdout=subprocess.PIPE, 
+                stderr=subprocess.DEVNULL, 
+                text=True
+            )
             
-            # Inyectamos la masa de datos al proceso y cerramos el canal de entrada
-            if process.stdin:
+            # Inyectamos los subdominios en el stdin de Katana
+            input_data = "\n".join(subdomains) + "\n"
+            try:
                 process.stdin.write(input_data)
                 process.stdin.close()
+            except BrokenPipeError:
+                logger.error("Katana cerró la conexión inesperadamente al recibir los datos (Broken Pipe).")
 
-            # Procesamos la salida de URLs concurrentes en tiempo real a medida que el motor de Katana las escupe
-            if process.stdout:
-                for line in process.stdout:
-                    url = line.strip()
-                    if url:
-                        # Filtro de protección legal inmediato sobre la marcha
-                        if self.validator.is_allowed(url):
-                            discovered_urls.add(url)
-                        else:
-                            logger.debug(f"Katana halló un enlace Out-of-Scope descartado: {url}")
+            # Streaming de URLs descubiertas en tiempo real
+            for line in process.stdout:
+                url = line.strip()
+                if not url:
+                    continue
+                
+                # Filtro de alcance perimetral
+                if self.validator.is_allowed(url):
+                    discovered_urls.add(url)
+                    logger.debug(f"[Crawler-URL] {url}")
 
-            # Esperar el cierre limpio del proceso y atrapar errores severos
-            _, stderr_output = process.communicate()
-            if process.returncode != 0 and stderr_output:
-                if "error" in stderr_output.lower():
-                    logger.warning(f"Katana reportó una incidencia durante el crawling activo: {stderr_output.strip()}")
+            return_code = process.wait()
+            if return_code == 0:
+                logger.info(f"Katana finalizó exitosamente. Extraídas {len(discovered_urls)} URLs válidas.")
+            else:
+                logger.error(f"Katana terminó con código de error: {return_code}")
 
+        except KeyboardInterrupt:
+            logger.warning("\n[!] Interrupción detectada en SpiderCrawler. Matando procesos de Katana...")
+            if process:
+                process.kill()
+                process.wait()
+            raise
+            
         except Exception as e:
-            logger.error(f"Error crítico en la ejecución masiva de Katana: {e}")
+            logger.error(f"Error inesperado en el wrapper de Katana: {e}", exc_info=True)
+            if process:
+                process.kill()
+                process.wait()
 
-        logger.info(f"Katana finalizado. Endpoints únicos e In-Scope hallados: {len(discovered_urls)}")
         return discovered_urls
