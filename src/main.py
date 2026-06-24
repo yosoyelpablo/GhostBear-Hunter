@@ -158,7 +158,7 @@ def main():
 
             # --- FASE 5: Triaje Cognitivo con IA y Reporte ---
             logger.info("Enviando resultados consolidados al motor de IA (Gemini)...")
-            blueprint = ai_mentor.generate_blueprint(target, analysis_results)
+            blueprint = ai_mentor.generate_blueprint(target, clean_subs, live_urls, analysis_results)
             
             if blueprint:
                 report_path = save_report(target, blueprint)
