@@ -7,7 +7,7 @@ from src.core.scope_validator import ScopeValidator
 logger = logging.getLogger("GhostBear-Hunter.ArchiveCrawler")
 
 class ArchiveCrawler:
-    """Wrapper robusto para la herramienta GAU (GetAllUrls)."""
+    """Wrapper optimizado para GAU (GetAllUrls) enfocado en la extracción de endpoints históricos."""
     
     def __init__(self, validator: ScopeValidator):
         self.validator = validator
@@ -25,50 +25,62 @@ class ArchiveCrawler:
 
     def run(self, domains: List[str]) -> Set[str]:
         """
-        Ejecuta GAU para una lista de dominios y filtra los resultados
-        en tiempo real asegurando el cumplimiento del alcance.
+        Recibe la lista de subdominios activos y ejecuta GAU mediante stdin.
+        Busca únicamente los directorios, archivos y parámetros de esos hosts exactos (sin buscar subdominios).
         """
         if not self.available:
             logger.warning("Saltando Archive Crawler debido a la falta del binario 'gau'.")
             return set()
 
+        if not domains:
+            logger.warning("No se proporcionaron dominios para procesar en Archive Crawler.")
+            return set()
+
         discovered_urls: Set[str] = set()
-        logger.info(f"Iniciando recolección histórica con GAU para {len(domains)} dominios...")
+        logger.info(f"Iniciando recolección de directorios históricos con GAU para {len(domains)} hosts...")
 
-        for domain in domains:
-            # Construcción segura del comando sin shell=True
-            cmd = [self.binary_name, "--subs", domain]
+        # Ejecutamos GAU sin el flag '--subs' y sin pasarle un dominio directo como argumento.
+        # Al dejarlo vacío, el binario queda esperando la lista completa de objetivos por stdin.
+        cmd = [self.binary_name]
+        
+        try:
+            logger.debug(f"Lanzando proceso unificado de GAU: {' '.join(cmd)}")
+            process = subprocess.Popen(
+                cmd,
+                stdin=subprocess.PIPE,   # Habilitamos la entrada para inyectar la lista
+                stdout=subprocess.PIPE,  # Capturamos la salida de URLs
+                stderr=subprocess.PIPE,
+                text=True,
+                bufsize=1                # Modo streaming línea por línea
+            )
+
+            # Convertimos la lista de dominios en un solo string separado por saltos de línea
+            input_data = "\n".join(domains) + "\n"
             
-            try:
-                logger.debug(f"Ejecutando comando: {' '.join(cmd)}")
-                
-                # Usamos Popen para procesar el output línea por línea (streaming) sin saturar la RAM
-                process = subprocess.Popen(
-                    cmd,
-                    stdout=subprocess.PIPE,
-                    stderr=subprocess.PIPE,
-                    text=True,
-                    bufsize=1
-                )
+            # Inyectamos los objetivos al stdin y cerramos el flujo de entrada para que comience a trabajar
+            if process.stdin:
+                process.stdin.write(input_data)
+                process.stdin.close()
 
-                # Procesar salida en tiempo real
-                if process.stdout:
-                    for line in process.stdout:
-                        url = line.strip()
-                        if url:
-                            # Filtro de protección legal inmediato
-                            if self.validator.is_allowed(url):
-                                discovered_urls.add(url)
-                            else:
-                                logger.debug(f"URL filtrada por Scope (Out-of-Scope): {url}")
+            # Procesamos la salida de URLs en tiempo real a medida que van apareciendo
+            if process.stdout:
+                for line in process.stdout:
+                    url = line.strip()
+                    if url:
+                        # Control de protección legal inmediato
+                        if self.validator.is_allowed(url):
+                            discovered_urls.add(url)
+                        else:
+                            logger.debug(f"URL filtrada por Scope (Out-of-Scope): {url}")
 
-                # Esperar a que termine y capturar posibles errores de ejecución
-                _, stderr_output = process.communicate()
-                if process.returncode != 0 and stderr_output:
-                    logger.warning(f"GAU reportó una alerta para {domain}: {stderr_output.strip()}")
+            # Esperar el cierre limpio del proceso y verificar errores severos
+            _, stderr_output = process.communicate()
+            if process.returncode != 0 and stderr_output:
+                if "error" in stderr_output.lower():
+                    logger.warning(f"GAU reportó una incidencia durante la recolección: {stderr_output.strip()}")
 
-            except Exception as e:
-                logger.error(f"Error crítico ejecutando GAU en el dominio {domain}: {e}")
+        except Exception as e:
+            logger.error(f"Error crítico en la ejecución unificada de GAU: {e}")
 
-        logger.info(f"GAU finalizado. Endpoints válidos e In-Scope hallados: {len(discovered_urls)}")
+        logger.info(f"GAU finalizado. Endpoints únicos e In-Scope hallados: {len(discovered_urls)}")
         return discovered_urls
