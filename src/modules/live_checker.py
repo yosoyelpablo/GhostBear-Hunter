@@ -24,7 +24,7 @@ class LiveChecker:
     def run(self, urls: Set[str], threads: int, timeout: int, status_codes: str) -> List[str]:
         """
         Envía el pool de URLs recolectadas a HTTPX vía stdin para comprobar cuáles están vivas
-        y responden bajo los criterios de filtrado seleccionados.
+        y responden bajo los criterios de filtrado seleccionados en tiempo real (streaming).
         """
         if not self.available:
             logger.warning("Saltando validación de hosts vivos debido a la falta de 'httpx'. Devolviendo pool sin filtrar.")
@@ -48,9 +48,7 @@ class LiveChecker:
         ]
 
         try:
-            # Unimos el set de URLs por saltos de línea para pasarlas limpias al buffer stdin
-            stdin_data = "\n".join(urls)
-            logger.debug(f"Lanzando proceso: {' '.join(cmd)}")
+            logger.debug(f"Lanzando proceso streaming de HTTPX: {' '.join(cmd)}")
             
             process = subprocess.Popen(
                 cmd,
@@ -58,21 +56,27 @@ class LiveChecker:
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
                 text=True,
-                bufsize=1
+                bufsize=1  # Line-buffering real activado para recibir la salida al vuelo
             )
 
-            # Inyección directa por pipeline de memoria y recolección de respuestas masivas
-            stdout_output, stderr_output = process.communicate(input=stdin_data)
+            # Inyectamos el pool completo de URLs en el buffer stdin de httpx
+            stdin_data = "\n".join(urls) + "\n"
+            if process.stdin:
+                process.stdin.write(stdin_data)
+                process.stdin.close()  # Cerramos el flujo de entrada para avisarle que ya terminamos de escribir
 
+            # Procesamos la salida de hosts vivos línea por línea a medida que httpx los va confirmando
+            if process.stdout:
+                for line in process.stdout:
+                    endpoint = line.strip()
+                    if endpoint:
+                        live_endpoints.append(endpoint)
+
+            # Capturamos posibles alertas o fallos en el stderr una vez que el motor termina de iterar
+            _, stderr_output = process.communicate()
             if process.returncode != 0 and stderr_output:
                 if "error" in stderr_output.lower():
                     logger.warning(f"HTTPX emitió una alerta durante el escaneo: {stderr_output.strip()}")
-
-            # Parseo inmediato línea por línea de los objetivos vivos devueltos
-            for line in stdout_output.splitlines():
-                endpoint = line.strip()
-                if endpoint:
-                    live_endpoints.append(endpoint)
 
         except Exception as e:
             logger.error(f"Error crítico durante la orquestación de HTTPX: {e}")
