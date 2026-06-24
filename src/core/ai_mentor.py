@@ -3,7 +3,6 @@ import logging
 from typing import List, Dict, Any
 import google.generativeai as genai
 from google.generativeai.types import GenerationConfig
-from google import genai
 
 logger = logging.getLogger("GhostBear-Hunter.AiMentor")
 
