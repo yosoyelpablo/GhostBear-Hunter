@@ -10,6 +10,7 @@ from src.modules.sub_recon import SubRecon
 from src.modules.archive_crawler import ArchiveCrawler
 from src.modules.spider_crawler import SpiderCrawler
 from src.modules.live_checker import LiveChecker
+from src.core.ai_mentor import AiMentor
 
 # Configuración estética y profesional de logs
 logging.basicConfig(
