@@ -1,18 +1,28 @@
 import subprocess
-import shutil
 import logging
 from typing import Set, List
+from src.core.binary_resolver import resolve_binary
 
 logger = logging.getLogger("GhostBear-Hunter.LiveChecker")
 
 class LiveChecker:
     def __init__(self):
-        """Inicializa el validador de hosts vivos comprobando HTTPX."""
-        self.binary_name = "httpx"
-        self.available = shutil.which(self.binary_name) is not None
+        """
+        Inicializa el validador de hosts vivos comprobando HTTPX.
+        Nota: existe un paquete 'httpx' en pip (cliente HTTP de Python) que
+        colisiona en nombre con el toolkit 'httpx' de ProjectDiscovery (Go).
+        Por eso resolvemos explícitamente cuál de los candidatos del PATH
+        es el correcto, en vez de usar el primero que aparezca.
+        """
+        self.binary_path = resolve_binary("httpx", signature="projectdiscovery", version_flag="-h")
+        self.available = bool(self.binary_path)
 
         if not self.available:
-            logger.error(f"Falta una dependencia crítica: '{self.binary_name}' no está en el PATH.")
+            logger.error(
+                "Falta una dependencia crítica: el binario 'httpx' de ProjectDiscovery no se encontró "
+                "(o el que está en el PATH es el paquete de Python con el mismo nombre, no el toolkit en Go). "
+                "Instalalo con: go install github.com/projectdiscovery/httpx/cmd/httpx@latest"
+            )
 
     def run(self, urls: Set[str], threads: int, timeout: int, status_codes: str, rate_limit: int, custom_header: str, user_agent: str) -> List[str]:
         """
@@ -30,13 +40,12 @@ class LiveChecker:
         logger.info(f"Verificando hosts vivos con HTTPX a {rate_limit} RPS (Hilos globales: {threads})...")
         live_endpoints: List[str] = []
 
-        # Estructura del comando dinámico blindado
         cmd = [
-            self.binary_name,
+            self.binary_path,
             "-t", str(threads),
             "-timeout", str(timeout),
             "-mc", status_codes,
-            "-rl", str(rate_limit),  # <-- Aplicación del Rate Limit sutil
+            "-rl", str(rate_limit),
             "-silent",
             "-no-color"
         ]
@@ -56,7 +65,6 @@ class LiveChecker:
                 text=True
             )
             
-            # Mandamos el lote de endpoints descubiertos por el caño
             input_data = "\n".join(urls) + "\n"
             try:
                 process.stdin.write(input_data)
@@ -64,7 +72,6 @@ class LiveChecker:
             except BrokenPipeError:
                 logger.error("HTTPX cerró el pipe de entrada abruptamente.")
 
-            # Captura de hosts vivos en tiempo real
             for line in process.stdout:
                 endpoint = line.strip()
                 if endpoint:
