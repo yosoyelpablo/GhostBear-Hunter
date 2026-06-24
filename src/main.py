@@ -25,9 +25,9 @@ logger = logging.getLogger("GhostBear-Hunter")
 
 BANNER = """
 ====================================================================
-  ____ _                 _   ____                  _   _             _             
- / ___| |__   ___  ___| |_|  _ \  ___  __ _ _ __| | | |_   _ _ __ | |_ ___ _ __  
-| |   | '_ \ / _ \/ __| __| |_) / _ \/ _` | '__| |_| | | | | '_ \| __/ _ \ '__| 
+  ____ _                  _   ____                 _   _             _             
+ / ___| |__   ___  ___| |_|  _ \  ___  __ _ _ __| | | |_  _ _ __ | |_ ___ _ __  
+| |    | '_ \ / _ \/ __| __| |_) / _ \/ _` | '__| |_| | | | | '_ \| __/ _ \ '__| 
 | |___| | | | (_) \__ \ |_|  _ <  __/ (_| | |  |  _  | |_| | | | | ||  __/ |    
  \____|_| |_|\___/|___/\__|_| \_\___|\__,_|_|  |_| |_|\__,_|_| |_|\__\___|_|    
                                                                                 
@@ -121,12 +121,10 @@ def main():
             
             # --- FASE 1: Enumeración de Subdominios (Pasiva) ---
             discovered_subs = sub_recon.run(target, rate_limit=args.rate_limit, threads=args.threads)
-            clean_subs = list(discovered_subs) if discovered_subs else []
             
-            if not clean_subs:
-                logger.warning(f"No se detectaron subdominios permitidos para {target}. Saltando semilla.")
-                continue
-
+            # CORRECCION: Si no hay subs, usamos el propio dominio como semilla
+            clean_subs = list(discovered_subs) if discovered_subs else [target]
+            
             # --- FASE 2: Extracción de URLs Históricas y Activas ---
             gau_urls = archive_crawler.run(clean_subs)
             katana_urls = spider_crawler.run(
