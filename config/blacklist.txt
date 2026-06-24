@@ -1,0 +1,2 @@
+# Subdominios o dominios explícitamente prohibidos
+admin.ejemplo.com
