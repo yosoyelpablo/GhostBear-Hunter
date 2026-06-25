@@ -55,7 +55,8 @@ def parse_arguments():
     op_group.add_argument("--status-codes", type=str, default="200,301,302,403", help="Códigos de estado HTTP permitidos (Defecto: 200,301,302,403).")
     op_group.add_argument("--user-agent", type=str, default="GhostBear-Hunter-Scanner/1.0", help="User-Agent personalizado para las cabeceras HTTP.")
     op_group.add_argument("--header", type=str, default="", help="Cabecera custom opcional en formato 'Nombre: Valor' (ej: 'X-BugBounty: pablo').")
-
+    op_group.add_argument("--headless", action="store_true", help="Activa el renderizado JS de Katana (navegador headless) para SPAs como Angular/React/Vue. Más lento pero descubre endpoints generados dinámicamente.")
+    
     parser.add_argument("--silent", action="store_true", help="Modo silencioso.")
     
     return parser.parse_args()
@@ -132,7 +133,8 @@ def main():
                 depth=2, 
                 rate_limit=args.rate_limit, 
                 custom_header=args.header, 
-                user_agent=args.user_agent
+                user_agent=args.user_agent,
+                headless=args.headless
             )
             
             all_discovered_urls = gau_urls.union(katana_urls)
