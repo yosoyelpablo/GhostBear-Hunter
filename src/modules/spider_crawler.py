@@ -16,10 +16,16 @@ class SpiderCrawler:
         if not self.available:
             logger.error(f"Falta una dependencia crítica: '{self.binary_name}' no está en el PATH.")
 
-    def run(self, subdomains: List[str], depth: int, rate_limit: int, custom_header: str, user_agent: str) -> Set[str]:
+    def run(self, subdomains: List[str], depth: int, rate_limit: int, custom_header: str, user_agent: str, headless: bool = False) -> Set[str]:
         """
         Ejecuta Katana a través de inyección por stdin en modo streaming.
         Soporta cancelación limpia y previene bloqueos de buffer.
+
+        Si headless=True, Katana levanta un navegador Chromium sin interfaz
+        para ejecutar el JavaScript de la página antes de extraer los links.
+        Esto es indispensable para SPAs (Angular, React, Vue, etc.) donde el
+        HTML crudo no contiene el contenido real, pero es más lento que el
+        modo estándar, así que se deja como opt-in.
         """
         if not self.available:
             logger.warning("SpiderCrawler omitido: binario katana no disponible.")
@@ -29,10 +35,10 @@ class SpiderCrawler:
             logger.warning("SpiderCrawler no recibió subdominios para rastrear.")
             return set()
 
-        logger.info(f"Iniciando Spidering activo con Katana (Profundidad: {depth} | Rate Limit: {rate_limit} RPS)...")
+        modo = "Headless (Renderizado JS)" if headless else "Estándar (HTML crudo)"
+        logger.info(f"Iniciando Spidering activo con Katana (Profundidad: {depth} | Rate Limit: {rate_limit} RPS | Modo: {modo})...")
         discovered_urls: Set[str] = set()
 
-        # Construcción exacta del comando según la política del JSON
         cmd = [
             self.binary_name,
             "-d", str(depth),
@@ -41,7 +47,10 @@ class SpiderCrawler:
             "-no-color"
         ]
 
-        # Inyección de cabeceras de identidad exigidas por las plataformas
+        if headless:
+            cmd.append("-headless")
+            cmd.append("-no-sandbox")
+
         if user_agent:
             cmd.extend(["-H", f"User-Agent: {user_agent}"])
         if custom_header and ":" in custom_header:
@@ -49,7 +58,6 @@ class SpiderCrawler:
 
         process = None
         try:
-            # Enviamos stderr a DEVNULL para evitar colgar el buffer de salida de errores
             process = subprocess.Popen(
                 cmd, 
                 stdin=subprocess.PIPE, 
@@ -58,7 +66,6 @@ class SpiderCrawler:
                 text=True
             )
             
-            # Inyectamos los subdominios en el stdin de Katana
             input_data = "\n".join(subdomains) + "\n"
             try:
                 process.stdin.write(input_data)
@@ -66,13 +73,11 @@ class SpiderCrawler:
             except BrokenPipeError:
                 logger.error("Katana cerró la conexión inesperadamente al recibir los datos (Broken Pipe).")
 
-            # Streaming de URLs descubiertas en tiempo real
             for line in process.stdout:
                 url = line.strip()
                 if not url:
                     continue
                 
-                # Filtro de alcance perimetral
                 if self.validator.is_allowed(url):
                     discovered_urls.add(url)
                     logger.debug(f"[Crawler-URL] {url}")
