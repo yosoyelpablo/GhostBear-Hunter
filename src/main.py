@@ -56,7 +56,7 @@ def parse_arguments():
     op_group.add_argument("--user-agent", type=str, default="GhostBear-Hunter-Scanner/1.0", help="User-Agent personalizado para las cabeceras HTTP.")
     op_group.add_argument("--header", type=str, default="", help="Cabecera custom opcional en formato 'Nombre: Valor' (ej: 'X-BugBounty: pablo').")
     op_group.add_argument("--headless", action="store_true", help="Activa el renderizado JS de Katana (navegador headless) para SPAs como Angular/React/Vue. Más lento pero descubre endpoints generados dinámicamente.")
-    
+
     parser.add_argument("--silent", action="store_true", help="Modo silencioso.")
     
     return parser.parse_args()
